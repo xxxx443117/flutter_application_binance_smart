@@ -37,6 +37,8 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
   ];
   String _selectedSort = '默认';
 
+  String _selectedSortDirection = '降序';
+
   final List<String> _amountRangeOptions = [
     'ALL',
     '0-10k', // 0 到 1万
@@ -106,22 +108,24 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
 
   /// 根据当前排序方式对列表排序
   void _applySort(List<SmartMoneySignal> list) {
+    int compareTo (num a, num b) {
+      return _selectedSortDirection == '降序' ? a.compareTo(b) : b.compareTo(a);
+    }
     switch (_selectedSort) {
       case '持仓数量':
         // 使用优势持仓大小排序（降序）
         list.sort(
-          (a, b) =>
-              _getDominantPosition(b).compareTo(_getDominantPosition(a)),
+          (a, b) => 
+              compareTo(_getDominantPosition(b), _getDominantPosition(a)),
         );
       case '多空名义比率':
         list.sort(
-          (a, b) => _getLongShortRatio(b).compareTo(_getLongShortRatio(a)),
+          (a, b) => compareTo(_getLongShortRatio(b), _getLongShortRatio(a)),
         );
       case '交易者数量':
         list.sort(
           (a, b) =>
-              (b.longTraders + b.shortTraders)
-                  .compareTo(a.longTraders + a.shortTraders),
+              compareTo((b.longTraders + b.shortTraders).toDouble(), (a.longTraders + a.shortTraders).toDouble()),
         );
       case '默认':
       default:
@@ -318,6 +322,17 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () {
+                    setState(() {
+                      _selectedSortDirection = _selectedSortDirection == '降序' ? '升序' : '降序';
+                    });
+                    _applyFilter();
+                  },
+                  child: Text(_selectedSortDirection),
+              ),
+              
             ],
           ),
           const SizedBox(height: 8),
