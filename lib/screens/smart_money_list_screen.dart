@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/smart_money_signal.dart';
+import '../models/ticker_24hr.dart';
 import '../services/binance_api.dart';
 
 class SmartMoneyListScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
   // 原始数据 & 筛选后数据
   List<SmartMoneySignal> _allSignals = [];
   List<SmartMoneySignal> _filteredSignals = [];
+  Map<String, Ticker24hr> _ticker24hrMap = {};
 
   // 状态
   bool _isLoading = true;
@@ -30,12 +32,12 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
 
   // 排序方式
   final List<String> _sortOptions = [
-    '默认',
-    '持仓数量',
     '多空名义比率',
+    '持仓数量',
     '交易者数量',
+    "24h涨幅",
   ];
-  String _selectedSort = '默认';
+  String _selectedSort = '多空名义比率';
 
   String _selectedSortDirection = '降序';
 
@@ -70,6 +72,8 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
       final data =
           await _api.getSmartMoneySignals(timeRange: _selectedTimeRange);
       _allSignals = data;
+      final ticker24hrData = await _api.getTicker24hr();
+      _ticker24hrMap = _buildTicker24hrMap(ticker24hrData);
       _applyFilter(); // 根据当前搜索关键字做一次本地筛选
       setState(() {
         _isLoading = false;
@@ -80,6 +84,10 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Map<String, Ticker24hr> _buildTicker24hrMap(List<Ticker24hr> data) {
+    return Map.fromEntries(data.map((t) => MapEntry(t.symbol, t)));
   }
 
   /// 根据当前搜索关键字对 _allSignals 做本地过滤，并应用排序
@@ -98,6 +106,8 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
 
 
 
+
+
     _applySort(list);
     list = _applyAmountRangeFilter(list);
 
@@ -105,6 +115,7 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
       _filteredSignals = list;
     });
   }
+
 
   /// 根据当前排序方式对列表排序
   void _applySort(List<SmartMoneySignal> list) {
@@ -127,7 +138,11 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
           (a, b) =>
               compareTo((b.longTraders + b.shortTraders).toDouble(), (a.longTraders + a.shortTraders).toDouble()),
         );
-      case '默认':
+      case '24h涨幅':
+        list.sort(
+          (a, b) =>
+              compareTo(_ticker24hrMap[b.symbol]!.priceChangePercent, _ticker24hrMap[a.symbol]!.priceChangePercent),
+        );
       default:
         // 不做任何排序，保持接口返回顺序
         break;
@@ -475,15 +490,32 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
                       ),
                     ),
                   ),
+                  Row(children: [
+                    Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    // decoration: BoxDecoration(
+                    //   color: sideColor,
+                    //   borderRadius: BorderRadius.circular(4),
+                    // ),
+                    child: Text(
+                      _ticker24hrMap[s.symbol]?.lastPrice.toStringAsFixed(2) ?? "0",
+                      style: const TextStyle(
+                        // color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: sideColor,
+                      color: _ticker24hrMap[s.symbol]!.priceChangePercent > 0 ? Colors.green : Colors.red,
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      s.side == 'BUY' ? '买入' : '卖出',
+                      "${_ticker24hrMap[s.symbol]?.priceChangePercent.toStringAsFixed(2) ?? "0"}%",
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
@@ -491,6 +523,8 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
                       ),
                     ),
                   ),
+                  ],),
+                  
                 ],
               ),
               subtitle: Padding(
