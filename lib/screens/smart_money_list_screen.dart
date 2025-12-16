@@ -18,6 +18,10 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
   List<SmartMoneySignal> _allSignals = [];
   List<SmartMoneySignal> _filteredSignals = [];
   Map<String, Ticker24hr> _ticker24hrMap = {};
+  // 所有时间范围 -> 对应的完整信号列表
+  final Map<String, List<SmartMoneySignal>> _signalsByTimeRange = {};
+  // symbol -> (timeRange -> 对应信号)，方便在详情里展示多周期数据
+  final Map<String, Map<String, SmartMoneySignal>> _symbolTimeRangeSignals = {};
 
   // 状态
   bool _isLoading = true;
@@ -69,9 +73,29 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
     });
 
     try {
-      final data =
-          await _api.getSmartMoneySignals(timeRange: _selectedTimeRange);
-      _allSignals = data;
+      // 一次性拉取 30m / 1h / 24h / 7D / ALL 五个时间范围的数据
+      final futures = _timeRanges
+          .map((range) => _api.getSmartMoneySignals(timeRange: range))
+          .toList();
+      final results = await Future.wait(futures);
+
+      _signalsByTimeRange.clear();
+      _symbolTimeRangeSignals.clear();
+
+      for (var i = 0; i < _timeRanges.length; i++) {
+        final range = _timeRanges[i];
+        final list = results[i];
+        _signalsByTimeRange[range] = list;
+
+        for (final s in list) {
+          _symbolTimeRangeSignals.putIfAbsent(s.symbol, () => {});
+          _symbolTimeRangeSignals[s.symbol]![range] = s;
+        }
+      }
+
+      // 当前列表使用选中的时间范围对应的数据
+      _allSignals = _signalsByTimeRange[_selectedTimeRange] ?? [];
+
       final ticker24hrData = await _api.getTicker24hr();
       _ticker24hrMap = _buildTicker24hrMap(ticker24hrData);
       _applyFilter(); // 根据当前搜索关键字做一次本地筛选
@@ -94,7 +118,10 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
   void _applyFilter() {
     final keyword = _searchController.text.trim().toLowerCase();
 
-    List<SmartMoneySignal> list;
+    // 基础列表始终取当前选中时间范围的数据
+    _allSignals = _signalsByTimeRange[_selectedTimeRange] ?? [];
+
+    List<SmartMoneySignal> list = [];
     if (keyword.isEmpty) {
       list = List<SmartMoneySignal>.from(_allSignals);
     } else {
@@ -173,7 +200,8 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
     setState(() {
       _selectedTimeRange = value;
     });
-    _loadData(); // 更换时间周期，重新从接口获取
+    // 切换时间周期时直接使用本地缓存数据并重新应用筛选与排序
+    _applyFilter();
   }
 
   String _formatNumber(double number) {
@@ -601,6 +629,9 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
                     children: [
                       _buildDetailRow('时间范围', s.timeRange),
                       const Divider(),
+                      // 多时间范围优势持仓 & 多空名义比率概览
+                      _buildMultiTimeRangeOverview(s.symbol),
+                      const Divider(),
                       _buildDetailRow(
                         '优势持仓',
                         _formatNumber(dominant),
@@ -684,6 +715,117 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建一个表格，展示该 symbol 在 30m / 1h / 24h / 7D / ALL 五个时间范围下的
+  /// 优势持仓和名义多空比率
+  Widget _buildMultiTimeRangeOverview(String symbol) {
+    final dataForSymbol = _symbolTimeRangeSignals[symbol];
+    if (dataForSymbol == null || dataForSymbol.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '多周期优势持仓 & 名义多空比率',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Table(
+          columnWidths: const {
+            0: IntrinsicColumnWidth(),
+            1: FlexColumnWidth(),
+            2: FlexColumnWidth(),
+          },
+          defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+          children: [
+            const TableRow(
+              children: [
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '周期',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '优势持仓',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    '名义多空比率',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            ..._timeRanges.map((range) {
+              final signal = dataForSymbol[range];
+              final hasData = signal != null;
+              final dominant =
+                  hasData ? _formatNumber(_getDominantPosition(signal)) : '-';
+              final ratio = hasData
+                  ? '${_getLongShortRatio(signal).toStringAsFixed(2)}%'
+                  : '-';
+              final color = hasData ? _getSideColor(signal.side) : Colors.grey;
+
+              return TableRow(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      range,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      dominant,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      ratio,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+          ],
+        ),
+      ],
     );
   }
 }
