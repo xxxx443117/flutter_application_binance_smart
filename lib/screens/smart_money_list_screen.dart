@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/smart_money_signal.dart';
 import '../models/ticker_24hr.dart';
@@ -228,6 +230,45 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
   double _getLongShortRatio(SmartMoneySignal s) {
     if (s.shortNotional == 0) return 0;
     return (s.longNotional / s.shortNotional) * 100.0;
+  }
+
+  /// 转换symbol格式：BTCUSDT -> BTC/USDT:USDT
+  String _formatSymbolForCopy(String symbol) {
+    if (symbol.endsWith('USDT')) {
+      final base = symbol.replaceAll('USDT', '');
+      return '$base/USDT:USDT';
+    }
+    return symbol;
+  }
+
+  /// 复制到剪贴板
+  Future<void> _copyToClipboard(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已复制: $text'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  /// 打开币安期货链接
+  Future<void> _openBinanceFutures(String symbol) async {
+    final url = Uri.parse('https://www.binance.com/zh-CN/futures/$symbol');
+    if (await canLaunchUrl(url)) {
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('无法打开链接'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -490,19 +531,23 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             elevation: 2,
             child: ExpansionTile(
-              leading: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: sideColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(
-                  child: Text(
-                    s.symbol.replaceAll('USDT', ''),
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: sideColor,
+              leading: InkWell(
+                onTap: () => _openBinanceFutures(s.symbol),
+                borderRadius: BorderRadius.circular(8),
+                child: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: sideColor.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Text(
+                      s.symbol.replaceAll('USDT', ''),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: sideColor,
+                      ),
                     ),
                   ),
                 ),
@@ -510,11 +555,14 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
               title: Row(
                 children: [
                   Expanded(
-                    child: Text(
-                      s.symbol,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                    child: InkWell(
+                      onTap: () => _copyToClipboard(_formatSymbolForCopy(s.symbol)),
+                      child: Text(
+                        s.symbol,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                        ),
                       ),
                     ),
                   ),
@@ -527,7 +575,7 @@ class _SmartMoneyListScreenState extends State<SmartMoneyListScreen> {
                     //   borderRadius: BorderRadius.circular(4),
                     // ),
                     child: Text(
-                      _ticker24hrMap[s.symbol]?.lastPrice.toStringAsFixed(2) ?? "0",
+                      _ticker24hrMap[s.symbol]?.lastPrice.toString() ?? "0",
                       style: const TextStyle(
                         // color: Colors.white,
                         fontSize: 12,
